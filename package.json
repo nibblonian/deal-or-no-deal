@@ -1,0 +1,17 @@
+{
+  "name": "deal-or-no-deal",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "build:client": "bun build ./public/script.ts --outfile=./public/script.js --target=browser --minify",
+    "start": "bun run server.ts",
+    "dev": "bun build ./public/script.ts --outfile=./public/script.js --target=browser --watch & bun run start"
+  }
+}
