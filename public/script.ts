@@ -1,223 +1,424 @@
 export {};
 
-interface Prize { name: string; value: number }
-interface Tile extends Prize { id: number; opened: boolean }
+/* ------------------------------------------------------------------ *
+ * Deal or No Deal — self-hosted birthday edition
+ *
+ * Flow:
+ *   1. Player picks ONE case to be "their case" (flies into the tray).
+ *   2. Rounds of eliminating cases, with a diminishing number to open
+ *      each round. Every opened case flips to reveal its prize.
+ *   3. After each round the Bank makes an offer (~half of what's left).
+ *      DEAL ends the game; NO DEAL keeps going.
+ *   4. When only the player's case remains, they open it for the finale.
+ *
+ * Bonus: eliminating the LOWEST-value case still on the board is lucky,
+ * so the remaining cases dance and confetti falls.
+ * ------------------------------------------------------------------ */
 
-let tiles: Tile[] = [];
-let mainCase: Tile | null = null;
-let compareCases: Tile[] = [];
-let phase: 'selectMain' | 'selectComp1' | 'selectComp2' | 'chooseDiscard' = 'selectMain';
-let discardPile: Tile[] = [];
+interface Prize { name: string; value: number; }
+interface Caze extends Prize { id: number; opened: boolean; isOwn: boolean; }
 
-// fetch prize configuration
-async function loadPrizes(): Promise<any> {
-  const res = await fetch("/api/prizes");
-  PRIZES = await res.json();
-}
+type Phase = "pickOwn" | "eliminating" | "offer" | "finalReveal" | "done";
+
+const state = {
+  cases: [] as Caze[],
+  rounds: [] as number[], // how many to open in each round
+  roundIndex: 0,          // which round we're on (0-based)
+  remainingThisRound: 0,  // opens left in the current round
+  phase: "pickOwn" as Phase,
+};
 
 let PRIZES: Prize[] = [];
 
-// Shuffle helper: Generic arrow to avoid JSX parsing issues
-const shuffle = <T,>(arr: T[]): T[] => {
-  // copy before shuffle to avoid mutating original
+// How long a freshly opened case stays "popped" and prominent before it
+// shrinks back into the grid.
+const REVEAL_MS = 1100;
+
+/* ---------- tiny helpers ---------- */
+
+const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
+  document.getElementById(id) as T;
+
+const money = (n: number): string =>
+  "$" + Math.round(n).toLocaleString("en-US");
+
+function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
-  return a.sort(() => Math.random() - 0.5);
-};
-
-function initGame(): void {
-  // Reset state
-  mainCase = null;
-  compareCases = [];
-  phase = 'selectMain';
-  discardPile = [];
-
-  // Build a fresh board of 26 cases
-  tiles = shuffle(PRIZES)
-    .slice(0, 26)
-    .map((p, i) => ({
-      id: i + 1,
-      name: p.name,
-      value: p.value,
-      opened: false
-    }));
-
-  // Render everything
-  render();
-  renderHeld();
-  renderDiscard();
-}
-function render(): void {
-  const board = document.getElementById("board")!;
-  board.innerHTML = "";
-  tiles.forEach(tile => {
-    if (tile.opened) return;
-    if (mainCase && tile.id === mainCase.id) return;
-    if (compareCases.find(c => c.id === tile.id)) return;
-    if (discardPile.find(d => d.id === tile.id)) return;
-
-    const btn = document.createElement("div");
-    btn.className = "tile" + (tile.opened ? " opened" : "");
-    btn.textContent = tile.opened
-      ? `${ tile.name } ($${ tile.value })`
-      : String(tile.id);
-    btn.onclick = (e) => onTileClick(tile.id, e.currentTarget as HTMLElement);
-    board.appendChild(btn);
-  });
-  const info = document.getElementById("info")!;
-  if (phase === 'selectMain') {
-    info.textContent = 'Pick your main case!';
-  } else if (phase === 'selectComp1') {
-    info.textContent = `Main case selected (#${mainCase?.id}). Pick first comparison case.`;
-  } else if (phase === 'selectComp2') {
-    info.textContent = `First comparison case selected (#${compareCases[0]?.id}). Pick second comparison case.`;
-  } else if (phase === 'chooseDiscard') {
-    info.textContent = `Compare ${compareCases[0]?.name || ''} vs ${compareCases[1]?.name || ''}. Click one to discard.`;
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j]!, a[i]!];
   }
-}
-
-// Renders the discarded pile
-function renderDiscard(): void {
-  const discDiv = document.getElementById("discard");
-  if (!discDiv) return;
-  // Append recently discarded tiles
-  discDiv.innerHTML = "";
-  discardPile.forEach(tile => {
-    const div = document.createElement("div");
-    div.className = "discard-tile";
-    div.textContent = `${tile.name} ($${tile.value})`;
-    discDiv.appendChild(div);
-  });
+  return a;
 }
 
 /**
- * Renders the currently held cases into the #held container.
+ * Build a diminishing elimination schedule that opens `toOpen` cases total.
+ * e.g. 11 -> [4,3,2,1,1]   24 -> [6,5,4,3,2,1,1,1,1]
+ * The player gets an offer after each round except the last.
  */
-function renderHeld(): void {
-  // Render main case
-  const mainCaseDiv = document.getElementById("main-case");
-  if (mainCaseDiv && mainCase) {
-    mainCaseDiv.innerHTML = "";
-    const div = document.createElement("div");
-    div.className = "held-tile";
-    div.textContent = String(mainCase.id);
-    mainCaseDiv.appendChild(div);
+function buildRounds(toOpen: number): number[] {
+  const rounds: number[] = [];
+  let left = toOpen;
+  let chunk = Math.max(1, Math.round(Math.sqrt(toOpen * 1.5)));
+  while (left > 0) {
+    const take = Math.min(chunk, left);
+    rounds.push(take);
+    left -= take;
+    if (chunk > 1) chunk--;
   }
+  return rounds;
+}
 
-  // Render comparison cases
-  const heldDiv = document.getElementById("held");
-  if (!heldDiv) return;
-  heldDiv.innerHTML = "";
-  
-  compareCases.forEach((tile, idx) => {
-    const div = document.createElement("div");
-    div.className = "held-tile";
-    div.textContent = `${tile.name} ($${tile.value})`;
-    if (phase === "chooseDiscard") {
-      div.addEventListener("click", () => {
-        discardPile.push(tile);
-        compareCases.splice(idx, 1);
-        phase = "selectComp2";
-        document.getElementById("info")!.textContent =
-          `Discarded ${tile.name} ($${tile.value}). Pick next comparison case.`;
-        render();
-        renderHeld();
-        renderDiscard();
-      });
+/* ---------- setup ---------- */
+
+async function loadPrizes(): Promise<void> {
+  const res = await fetch("/api/prizes");
+  PRIZES = (await res.json()) as Prize[];
+}
+
+function newGame(): void {
+  hide($("offer-overlay"));
+  hide($("result-overlay"));
+
+  // One case per prize; shuffle so case numbers don't hint at value.
+  state.cases = shuffle(PRIZES).map((p, i) => ({
+    id: i + 1,
+    name: p.name,
+    value: p.value,
+    opened: false,
+    isOwn: false,
+  }));
+  state.rounds = [];
+  state.roundIndex = 0;
+  state.remainingThisRound = 0;
+  state.phase = "pickOwn";
+
+  // reset the tray
+  const slot = $("own-slot");
+  slot.className = "";
+  slot.innerHTML = '<span class="own-placeholder">?</span>';
+
+  buildBoard();
+  renderTracker();
+  setStatus("Pick a case to keep as YOUR case!", "");
+}
+
+/* ---------- rendering ---------- */
+
+function caseMarkup(c: Caze): string {
+  return `
+    <div class="case-inner">
+      <div class="case-face case-front"><span class="num">${c.id}</span></div>
+      <div class="case-face case-back">
+        <div class="prize-name">${c.name}</div>
+        <div class="prize-val">${money(c.value)}</div>
+      </div>
+    </div>`;
+}
+
+function buildBoard(): void {
+  const board = $("board");
+  board.innerHTML = "";
+  for (const c of state.cases) {
+    const el = document.createElement("div");
+    el.className = "case";
+    el.dataset.id = String(c.id);
+    el.innerHTML = caseMarkup(c);
+    el.addEventListener("click", () => onCaseClick(c.id));
+    board.appendChild(el);
+  }
+}
+
+function boardEl(id: number): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`#board .case[data-id="${id}"]`);
+}
+
+function renderTracker(): void {
+  // Show every value still on the board (including the player's own,
+  // which is why we never label which one is theirs). Struck when opened.
+  const list = $("tracker-list");
+  const entries = [...state.cases].sort((a, b) => b.value - a.value);
+  list.innerHTML = entries
+    .map((c) => `<li class="${c.opened ? "gone" : ""}">${money(c.value)}</li>`)
+    .join("");
+}
+
+function setStatus(line: string, round: string): void {
+  $("status-line").textContent = line;
+  $("round-line").textContent = round;
+}
+
+function roundStatus(): void {
+  const n = state.remainingThisRound;
+  setStatus(
+    n === 1 ? "Choose 1 case to open." : `Choose ${n} cases to open.`,
+    `Round ${state.roundIndex + 1} of ${state.rounds.length}`,
+  );
+}
+
+function hide(el: HTMLElement): void { el.classList.add("hidden"); }
+function show(el: HTMLElement): void { el.classList.remove("hidden"); }
+
+/* ---------- interaction ---------- */
+
+function onCaseClick(id: number): void {
+  const c = state.cases.find((x) => x.id === id);
+  if (!c || c.opened || c.isOwn) return;
+
+  if (state.phase === "pickOwn") pickOwn(c);
+  else if (state.phase === "eliminating") eliminate(c);
+}
+
+function pickOwn(c: Caze): void {
+  c.isOwn = true;
+  const source = boardEl(c.id);
+  const slot = $("own-slot");
+
+  const finishPick = () => {
+    // Put a face-down case into the tray.
+    slot.className = "filled";
+    slot.innerHTML = `<div class="case" data-own="1">${caseMarkup(c)}</div>`;
+    const boardCase = boardEl(c.id);
+    if (boardCase) boardCase.remove(); // it now lives in the tray only
+
+    state.rounds = buildRounds(state.cases.length - 1);
+    state.roundIndex = 0;
+    state.remainingThisRound = state.rounds[0] ?? 0;
+
+    // Tiny prize list: nothing to eliminate, go straight to the finale.
+    if (state.rounds.length === 0) {
+      startFinalReveal();
+      return;
     }
-    heldDiv.appendChild(div);
+    state.phase = "eliminating";
+    roundStatus();
+  };
+
+  if (source) flyToTray(source, slot, finishPick);
+  else finishPick();
+}
+
+/**
+ * True if `target` sits in the bottom quarter (by value) of the cases still
+ * eligible for elimination — losing one of those keeps the big prizes alive,
+ * so it's a lucky pick worth celebrating.
+ */
+function isBottomQuarter(target: Caze): boolean {
+  const vals = state.cases
+    .filter((x) => !x.opened && !x.isOwn) // includes `target`, still unopened here
+    .map((x) => x.value)
+    .sort((a, b) => a - b);
+  if (vals.length === 0) return false;
+  const cutoffIdx = Math.max(0, Math.ceil(vals.length / 4) - 1);
+  const threshold = vals[cutoffIdx]!;
+  return target.value <= threshold; // <= so ties on the boundary also count
+}
+
+function eliminate(c: Caze): void {
+  // Ignore clicks that land in the brief pause between a round ending and
+  // the Bank calling (an eager player mashing cases shouldn't over-open).
+  if (state.remainingThisRound <= 0) return;
+
+  const lucky = isBottomQuarter(c);
+
+  c.opened = true;
+  const el = boardEl(c.id);
+  if (el) {
+    // Pop it big and glowing, then let it settle back into the grid.
+    el.classList.add("opened", "disabled", "revealing");
+    window.setTimeout(() => el.classList.remove("revealing"), REVEAL_MS);
+  }
+  renderTracker();
+  state.remainingThisRound--;
+
+  if (lucky) celebrate();
+
+  if (state.remainingThisRound <= 0) {
+    // Let the prominent reveal (and any celebration) play before the Bank calls.
+    setStatus("…", `Round ${state.roundIndex + 1} of ${state.rounds.length}`);
+    window.setTimeout(endRound, REVEAL_MS + 150);
+  } else {
+    roundStatus();
+  }
+}
+
+function endRound(): void {
+  state.roundIndex++;
+  const othersLeft = state.cases.filter((c) => !c.opened && !c.isOwn).length;
+  if (othersLeft === 0) startFinalReveal();
+  else showOffer();
+}
+
+/* ---------- the Bank ---------- */
+
+function computeOffer(): number {
+  // Average value of everything still unopened (the player's case counts,
+  // its value just isn't known). Scaled up as the game progresses so early
+  // offers are tempting-but-low and later ones get serious. Tuned to stay
+  // well under the top prizes — see factor below.
+  const unopened = state.cases.filter((c) => !c.opened);
+  const avg = unopened.reduce((s, c) => s + c.value, 0) / unopened.length;
+  const progress = state.roundIndex / state.rounds.length; // 0..~1
+  const factor = 0.4 + 0.5 * progress; // ~40% early → ~90% of the average late
+  const raw = avg * factor;
+  return Math.max(5, Math.round(raw / 5) * 5); // round to a tidy $5
+}
+
+function showOffer(): void {
+  state.phase = "offer";
+  const offer = computeOffer();
+  $("offer-amount").textContent = money(offer);
+  $("offer-amount").dataset.value = String(offer);
+  show($("offer-overlay"));
+}
+
+function onDeal(): void {
+  const offer = Number($("offer-amount").dataset.value || "0");
+  state.phase = "done";
+  hide($("offer-overlay"));
+  revealAll();
+  const own = state.cases.find((c) => c.isOwn)!;
+  showResult(
+    `DEAL! 🤝 ${money(offer)}`,
+    `You stopped with an offer of <b>${money(offer)}</b>.<br/>` +
+      `Your case actually held <b>${own.name}</b> (${money(own.value)}).`,
+  );
+}
+
+function onNoDeal(): void {
+  hide($("offer-overlay"));
+  state.phase = "eliminating";
+  state.remainingThisRound = state.rounds[state.roundIndex] ?? 1;
+  roundStatus();
+}
+
+/* ---------- finale ---------- */
+
+function startFinalReveal(): void {
+  state.phase = "finalReveal";
+  setStatus("This is it — open YOUR case!", "");
+  const slot = $("own-slot");
+  slot.classList.add("pickable");
+  slot.onclick = revealOwn;
+}
+
+function revealOwn(): void {
+  if (state.phase !== "finalReveal") return;
+  state.phase = "done";
+  const slot = $("own-slot");
+  slot.classList.remove("pickable");
+  slot.onclick = null;
+
+  const own = state.cases.find((c) => c.isOwn)!;
+  own.opened = true;
+  const caseInTray = slot.querySelector<HTMLElement>(".case");
+  if (caseInTray) caseInTray.classList.add("opened");
+  renderTracker();
+
+  window.setTimeout(() => {
+    showResult(
+      `🎉 You won ${own.name}!`,
+      `Your case held <b>${own.name}</b>, worth <b>${money(own.value)}</b>.`,
+    );
+  }, 650);
+}
+
+function revealAll(): void {
+  // Flip open every remaining case (including the player's) so nothing's a mystery.
+  for (const c of state.cases) {
+    if (c.opened) continue;
+    c.opened = true;
+    if (c.isOwn) {
+      const caseInTray = $("own-slot").querySelector<HTMLElement>(".case");
+      if (caseInTray) caseInTray.classList.add("opened");
+    } else {
+      boardEl(c.id)?.classList.add("opened", "disabled");
+    }
+  }
+  renderTracker();
+}
+
+function showResult(headline: string, detailHtml: string): void {
+  $("result-headline").textContent = headline;
+  $("result-detail").innerHTML = detailHtml;
+  show($("result-overlay"));
+}
+
+/* ---------- celebration ---------- */
+
+function celebrate(): void {
+  dropConfetti();
+  const dancers = document.querySelectorAll<HTMLElement>(
+    "#board .case:not(.opened)",
+  );
+  dancers.forEach((d) => {
+    d.classList.remove("dancing");
+    // force reflow so the animation restarts if triggered twice
+    void d.offsetWidth;
+    d.classList.add("dancing");
+    window.setTimeout(() => d.classList.remove("dancing"), 1600);
   });
 }
 
-function animateTile(elem: HTMLElement, tile: Tile, targetId: string): void {
-  const start = elem.getBoundingClientRect();
-  const targetArea = document.getElementById(targetId);
-  if (!targetArea) return;
+function dropConfetti(): void {
+  const layer = $("confetti-layer");
+  const colors = ["#f6c945", "#35d07f", "#ff6b6b", "#4d8bff", "#c86bff", "#fff"];
+  const count = 90;
+  for (let i = 0; i < count; i++) {
+    const bit = document.createElement("div");
+    bit.className = "confetti";
+    bit.style.left = Math.random() * 100 + "vw";
+    bit.style.background = colors[i % colors.length]!;
+    bit.style.animationDuration = 2 + Math.random() * 1.8 + "s";
+    bit.style.animationDelay = Math.random() * 0.4 + "s";
+    bit.style.transform = `translateY(-10px) rotate(${Math.random() * 360}deg)`;
+    if (Math.random() < 0.5) bit.style.borderRadius = "50%";
+    layer.appendChild(bit);
+    window.setTimeout(() => bit.remove(), 4200);
+  }
+}
 
-  const clone = elem.cloneNode(true) as HTMLElement;
-  clone.classList.add('animating');
-  clone.style.width = `${start.width}px`;
-  clone.style.height = `${start.height}px`;
-  clone.style.top = `${start.top}px`;
-  clone.style.left = `${start.left}px`;
+/* ---------- the pick-your-case fly animation ---------- */
+
+function flyToTray(source: HTMLElement, target: HTMLElement, done: () => void): void {
+  const from = source.getBoundingClientRect();
+  const to = target.getBoundingClientRect();
+
+  const clone = document.createElement("div");
+  clone.className = "fly-clone";
+  clone.textContent = source.querySelector(".num")?.textContent ?? "?";
+  clone.style.width = from.width + "px";
+  clone.style.height = from.height + "px";
+  clone.style.left = from.left + "px";
+  clone.style.top = from.top + "px";
   document.body.appendChild(clone);
 
-  elem.style.visibility = 'hidden';
-  
-  const target = targetArea.getBoundingClientRect();
+  source.style.visibility = "hidden";
+
+  const dx = to.left + to.width / 2 - (from.left + from.width / 2);
+  const dy = to.top + to.height / 2 - (from.top + from.height / 2);
+
   requestAnimationFrame(() => {
-    clone.style.transform = `translate(
-      ${target.left - start.left + (target.width/2 - start.width/2)}px,
-      ${target.top - start.top + (target.height/2 - start.height/2)}px
-    )`;
+    clone.style.transform = `translate(${dx}px, ${dy}px) scale(${to.width / from.width})`;
   });
 
-  setTimeout(() => {
+  window.setTimeout(() => {
     clone.remove();
-    elem.style.visibility = 'visible';
-    render();
-    renderHeld();
-  }, 300);
+    done();
+  }, 560);
 }
 
-function onTileClick(id: number, elem?: HTMLElement): void {
-  const tile = tiles.find(t => t.id === id);
-  if (!tile || tile.opened || !elem) return;
+/* ---------- wiring ---------- */
 
-  if (phase === 'selectMain') {
-    mainCase = tile;
-    phase = 'selectComp1';
-    animateTile(elem, tile, 'main-case');
-  }
-  else if (phase === 'selectComp1') {
-    tile.opened = true;
-    compareCases.push(tile);
-    phase = 'selectComp2';
-    animateTile(elem, tile, 'held');
-    document.getElementById('info')!.textContent =
-      `First comparison case selected (#${tile.id}). Pick second comparison case.`;
-  }
-  else if (phase === 'selectComp2') {
-    tile.opened = true;
-    compareCases.push(tile);
-    phase = 'chooseDiscard';
-    animateTile(elem, tile, 'held');
-    document.getElementById('info')!.textContent =
-      `Compare ${compareCases[0]?.name || ''} vs ${compareCases[1]?.name || ''}. Click one to discard.`;
-  }
-  // do nothing on chooseDiscard phase for tile clicks here
-
-  render();
-  renderHeld();
-  renderDiscard();
-}
-
-
-document.getElementById("reset")!.addEventListener("click", initGame);
-
-// Confirm script is loaded
-console.log('Client script loaded');
-
-async function start() {
-  console.log('Starting game initialization');
+async function start(): Promise<void> {
   await loadPrizes();
-  console.log('Prizes loaded:', PRIZES);
-  tiles = shuffle(PRIZES)
-    .slice(0, 26)
-    .map((p, i) => ({ id: i + 1, name: p.name, value: p.value, opened: false }));
-  initGame();
-  // Wire up reset button after DOM exists
-  const resetBtn = document.getElementById('reset');
-  if (resetBtn) {
-    resetBtn.addEventListener('click', () => {
-      console.log('Reset clicked');
-      initGame();
-    });
-  } else {
-    console.warn('Reset button not found');
-  }
+  $("reset").addEventListener("click", newGame);
+  $("deal-btn").addEventListener("click", onDeal);
+  $("nodeal-btn").addEventListener("click", onNoDeal);
+  $("result-again").addEventListener("click", newGame);
+  newGame();
 }
 
-// Kick off once DOM is ready
-if (typeof window !== 'undefined') {
-  window.addEventListener('DOMContentLoaded', start);
+if (typeof window !== "undefined") {
+  window.addEventListener("DOMContentLoaded", start);
 }

@@ -10,7 +10,7 @@
     "typescript": "^5.8.3"
   },
   "scripts": {
-    "build:client": "bun build ./public/script.ts --outfile=./public/script.js --target=browser --minify",
+    "build:client": "esbuild public/script.ts --bundle --outfile=public/script.js --target=es2020 --platform=browser --sourcemap=inline --sources-content",
     "start": "bun run server.ts",
     "dev": "bun build ./public/script.ts --outfile=./public/script.js --target=browser --watch & bun run start"
   }

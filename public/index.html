@@ -2,29 +2,63 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Deal or No Deal</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h1>Deal or No Deal</h1>
-  <div id="board"></div>
-  <div id="info"></div>
-  <button id="reset">Reset Game</button>
-  <div id="main-case-area">
+  <!-- Falling confetti gets injected here -->
+  <div id="confetti-layer" aria-hidden="true"></div>
+
+  <header id="topbar">
+    <h1>💼 Deal or No Deal</h1>
+    <button id="reset" type="button">New Game</button>
+  </header>
+
+  <!-- Top-right tracker: the values still in play (never the actual gifts) -->
+  <aside id="tracker">
+    <h2>Values in play</h2>
+    <ol id="tracker-list"></ol>
+  </aside>
+
+  <main id="stage">
+    <div id="status">
+      <p id="status-line">Loading…</p>
+      <p id="round-line"></p>
+    </div>
+
+    <section id="board" aria-label="Cases"></section>
+  </main>
+
+  <!-- Your chosen case lives here, bottom-center -->
+  <section id="own-area">
     <h3>Your Case</h3>
-    <div id="main-case" class="main-case-container">
-      <!-- main case goes here -->
+    <div id="own-slot"><span class="own-placeholder">?</span></div>
+  </section>
+
+  <!-- The Bank's offer -->
+  <div id="offer-overlay" class="hidden">
+    <div id="offer-card">
+      <p class="offer-caller">📞 The Bank is calling…</p>
+      <p class="offer-label">Offer to stop now</p>
+      <p id="offer-amount">$0</p>
+      <p class="offer-sub">Take the deal, or keep opening cases?</p>
+      <div class="offer-buttons">
+        <button id="deal-btn" type="button">DEAL</button>
+        <button id="nodeal-btn" type="button">NO DEAL</button>
+      </div>
     </div>
   </div>
-  <div id="held-area">
-    <h3>Comparison Cases</h3>
-    <div id="held" class="held-container">
-      <!-- comparison cases go here -->
+
+  <!-- End-of-game result -->
+  <div id="result-overlay" class="hidden">
+    <div id="result-card">
+      <p id="result-headline"></p>
+      <p id="result-detail"></p>
+      <button id="result-again" type="button">Play Again</button>
     </div>
   </div>
-  <div id="discard" class="discard-container">
-    <!-- held tiles will go here -->
-  </div>
+
   <script type="module" src="script.js"></script>
 </body>
 </html>
