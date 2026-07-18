@@ -182,7 +182,8 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #8a6a00; }
   border: 1px solid rgba(246, 201, 69, 0.3);
   border-radius: 12px;
   padding: 8px 10px 10px;
-  z-index: 30;
+  /* above the overlays (60) so the values stay visible during the Bank call */
+  z-index: 70;
   backdrop-filter: blur(4px);
 }
 #tracker h2 {
@@ -283,6 +284,50 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #8a6a00; }
   animation: fade 0.25s ease;
 }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* the Bank call gets a dramatic dark-red stage with drifting spotlights */
+#offer-overlay {
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 38%, #5c0f0f, #2a0606 68%, #170303);
+}
+#offer-overlay::before,
+#offer-overlay::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+#offer-overlay::before {
+  width: 34vmax;
+  height: 34vmax;
+  top: -8%;
+  left: -6%;
+  background: radial-gradient(circle, rgba(255, 95, 70, 0.75), transparent 60%);
+  animation: spot1 5s ease-in-out infinite alternate;
+}
+#offer-overlay::after {
+  width: 30vmax;
+  height: 30vmax;
+  right: -6%;
+  bottom: -10%;
+  background: radial-gradient(circle, rgba(255, 160, 90, 0.6), transparent 60%);
+  animation: spot2 6.5s ease-in-out infinite alternate;
+}
+@keyframes spot1 {
+  0%   { transform: translate(0, 0) scale(1); opacity: 0.5; }
+  100% { transform: translate(48vw, 34vh) scale(1.35); opacity: 1; }
+}
+@keyframes spot2 {
+  0%   { transform: translate(0, 0) scale(1.25); opacity: 0.95; }
+  100% { transform: translate(-46vw, -34vh) scale(0.85); opacity: 0.4; }
+}
+/* keep the modal above the spotlights */
+#offer-card { position: relative; z-index: 2; }
+@media (prefers-reduced-motion: reduce) {
+  #offer-overlay::before, #offer-overlay::after { animation: none; }
+}
 
 #offer-card, #result-card {
   width: min(92vw, 440px);

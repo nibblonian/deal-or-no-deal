@@ -81,6 +81,37 @@ function buildBoard() {
 function boardEl(id) {
   return document.querySelector(`#board .case[data-id="${id}"]`);
 }
+function shuffleBoard() {
+  const board = $("board");
+  const kids = Array.from(board.children);
+  const before = new Map;
+  for (const k of kids)
+    before.set(k, k.getBoundingClientRect());
+  const order = shuffle(kids);
+  for (const k of order)
+    board.appendChild(k);
+  for (const k of order) {
+    const a = before.get(k);
+    const b = k.getBoundingClientRect();
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+    if (dx === 0 && dy === 0)
+      continue;
+    k.style.transition = "none";
+    k.style.transform = `translate(${dx}px, ${dy}px)`;
+    k.offsetWidth;
+    k.style.transitionDelay = `${Math.random() * 0.12}s`;
+    k.style.transition = "transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1)";
+    k.style.transform = "";
+  }
+  window.setTimeout(() => {
+    for (const k of order) {
+      k.style.transition = "";
+      k.style.transform = "";
+      k.style.transitionDelay = "";
+    }
+  }, 800);
+}
 function renderTracker() {
   const list = $("tracker-list");
   const entries = [...state.cases].sort((a, b) => b.value - a.value);
@@ -119,6 +150,7 @@ function pickOwn(c) {
     const boardCase = boardEl(c.id);
     if (boardCase)
       boardCase.remove();
+    shuffleBoard();
     state.rounds = buildRounds(state.cases.length - 1);
     state.roundIndex = 0;
     state.remainingThisRound = state.rounds[0] ?? 0;

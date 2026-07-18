@@ -133,6 +133,47 @@ function boardEl(id: number): HTMLElement | null {
   return document.querySelector<HTMLElement>(`#board .case[data-id="${id}"]`);
 }
 
+/**
+ * Re-randomize where the remaining cases sit on the board, animating each one
+ * as it slides to its new spot — like the models rearranging cases on the show.
+ * Uses a FLIP: measure, reorder the DOM, then play from old position to new.
+ */
+function shuffleBoard(): void {
+  const board = $("board");
+  const kids = Array.from(board.children) as HTMLElement[];
+
+  // First: where is everything now?
+  const before = new Map<HTMLElement, DOMRect>();
+  for (const k of kids) before.set(k, k.getBoundingClientRect());
+
+  // Reorder the DOM to a shuffled sequence.
+  const order = shuffle(kids);
+  for (const k of order) board.appendChild(k);
+
+  // Invert + play: jump each card back to its old spot, then transition to 0.
+  for (const k of order) {
+    const a = before.get(k)!;
+    const b = k.getBoundingClientRect();
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+    if (dx === 0 && dy === 0) continue;
+    k.style.transition = "none";
+    k.style.transform = `translate(${dx}px, ${dy}px)`;
+    void k.offsetWidth; // force the jump to take before we animate
+    k.style.transitionDelay = `${Math.random() * 0.12}s`;
+    k.style.transition = "transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1)";
+    k.style.transform = "";
+  }
+
+  window.setTimeout(() => {
+    for (const k of order) {
+      k.style.transition = "";
+      k.style.transform = "";
+      k.style.transitionDelay = "";
+    }
+  }, 800);
+}
+
 function renderTracker(): void {
   // Show every value still on the board (including the player's own,
   // which is why we never label which one is theirs). Struck when opened.
@@ -180,6 +221,9 @@ function pickOwn(c: Caze): void {
     slot.innerHTML = `<div class="case" data-own="1">${caseMarkup(c)}</div>`;
     const boardCase = boardEl(c.id);
     if (boardCase) boardCase.remove(); // it now lives in the tray only
+
+    // Reshuffle the rest so their positions can't be tracked.
+    shuffleBoard();
 
     state.rounds = buildRounds(state.cases.length - 1);
     state.roundIndex = 0;
