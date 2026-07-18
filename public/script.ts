@@ -76,7 +76,11 @@ async function loadPrizes(): Promise<void> {
   PRIZES = (await res.json()) as Prize[];
 }
 
-function newGame(): void {
+async function newGame(): Promise<void> {
+  // Re-fetch each game so prize edits from the manager view apply without a
+  // page reload.
+  await loadPrizes();
+
   hide($("offer-overlay"));
   hide($("result-overlay"));
 
@@ -455,12 +459,11 @@ function flyToTray(source: HTMLElement, target: HTMLElement, done: () => void): 
 /* ---------- wiring ---------- */
 
 async function start(): Promise<void> {
-  await loadPrizes();
   $("reset").addEventListener("click", newGame);
   $("deal-btn").addEventListener("click", onDeal);
   $("nodeal-btn").addEventListener("click", onNoDeal);
   $("result-again").addEventListener("click", newGame);
-  newGame();
+  await newGame();
 }
 
 if (typeof window !== "undefined") {

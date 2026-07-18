@@ -35,7 +35,8 @@ async function loadPrizes() {
   const res = await fetch("/api/prizes");
   PRIZES = await res.json();
 }
-function newGame() {
+async function newGame() {
+  await loadPrizes();
   hide($("offer-overlay"));
   hide($("result-overlay"));
   state.cases = shuffle(PRIZES).map((p, i) => ({
@@ -327,12 +328,11 @@ function flyToTray(source, target, done) {
   }, 560);
 }
 async function start() {
-  await loadPrizes();
   $("reset").addEventListener("click", newGame);
   $("deal-btn").addEventListener("click", onDeal);
   $("nodeal-btn").addEventListener("click", onNoDeal);
   $("result-again").addEventListener("click", newGame);
-  newGame();
+  await newGame();
 }
 if (typeof window !== "undefined") {
   window.addEventListener("DOMContentLoaded", start);

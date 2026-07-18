@@ -27,9 +27,19 @@ WORKDIR /app
 # copy built app
 COPY --from=builder /app /app
 
-# default port
-ENV PORT=3000 NODE_ENV=production TZ=America/Los_Angeles
+# Prizes live on a mounted volume so the manager view can edit them and the
+# changes survive restarts. The baked-in ./prizes.json is only the first-run
+# seed (used until config/prizes.json exists).
+RUN mkdir -p /app/config
+VOLUME /app/config
+
+# PRIZES_PATH is both the preferred file to load and where the manager view
+# saves. ADMIN_TOKEN is intentionally empty here — set it at `docker run` to
+# enable editing (no token => /admin can view but not save).
+ENV PORT=3000 NODE_ENV=production TZ=America/Los_Angeles \
+    PRIZES_PATH=/app/config/prizes.json \
+    ADMIN_TOKEN=
+
 EXPOSE 3000
 
-# You can override prizes.json via a bind mount on QNAP
 CMD ["bun","run","server.ts"]

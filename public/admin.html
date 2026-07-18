@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Prize Manager · Deal or No Deal</title>
+  <style>
+    :root {
+      --gold: #f6c945; --gold-deep: #d9a520;
+      --bg-0: #0b1026; --panel: #141b3d; --text: #f4f6ff;
+      --good: #35d07f; --bad: #ff6b6b; --line: rgba(255,255,255,0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px 16px 64px; min-height: 100vh;
+      font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+      color: var(--text);
+      background: radial-gradient(1000px 600px at 50% -10%, #1a2350, transparent 60%), var(--bg-0);
+    }
+    .wrap { max-width: 680px; margin: 0 auto; }
+    h1 { color: var(--gold); margin: 0 0 4px; font-size: 1.6rem; }
+    a { color: var(--gold); }
+    .sub { opacity: 0.75; margin: 0 0 20px; font-size: 0.95rem; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 12px; padding: 16px; margin-bottom: 16px;
+    }
+    label { display: block; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; opacity: 0.8; margin-bottom: 6px; }
+    input {
+      font: inherit; color: var(--text); background: rgba(0,0,0,0.25);
+      border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%;
+    }
+    input:focus { outline: none; border-color: var(--gold); }
+    .rows { display: grid; gap: 8px; }
+    .row { display: grid; grid-template-columns: 1fr 120px 40px; gap: 8px; align-items: center; }
+    .row .val { text-align: right; }
+    .row button.del {
+      background: transparent; border: 1px solid var(--line); color: var(--bad);
+      border-radius: 8px; height: 38px; cursor: pointer; font-size: 1.1rem; line-height: 1;
+    }
+    .row button.del:hover { border-color: var(--bad); }
+    .head { display: grid; grid-template-columns: 1fr 120px 40px; gap: 8px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; opacity: 0.6; margin-bottom: 6px; padding: 0 2px; }
+    .head span:nth-child(2) { text-align: right; }
+    button.action {
+      font: inherit; font-weight: 700; cursor: pointer; border: none; border-radius: 9px;
+      padding: 10px 16px; color: #1a1400; background: linear-gradient(#ffe08a, var(--gold-deep));
+    }
+    button.action:hover { filter: brightness(1.06); }
+    button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+    .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+    .summary { margin-left: auto; opacity: 0.85; font-variant-numeric: tabular-nums; }
+    .msg { margin-top: 12px; padding: 10px 12px; border-radius: 8px; display: none; }
+    .msg.show { display: block; }
+    .msg.ok { background: rgba(53,208,127,0.15); border: 1px solid var(--good); color: var(--good); }
+    .msg.err { background: rgba(255,107,107,0.15); border: 1px solid var(--bad); color: var(--bad); }
+    .notice { background: rgba(255,107,107,0.12); border: 1px solid var(--bad); color: #ffd7d7; padding: 10px 12px; border-radius: 8px; margin-bottom: 16px; display: none; }
+    .notice.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🎁 Prize Manager</h1>
+    <p class="sub">Edit the cases for the game. Changes apply the next time someone starts a New Game. <a href="/">← Back to the game</a></p>
+
+    <div id="disabled-notice" class="notice">
+      Editing is <b>disabled</b> because no password (<code>ADMIN_TOKEN</code>) is set on the server.
+      You can view the list but not save.
+    </div>
+
+    <div class="card">
+      <label for="token">Manager password</label>
+      <input id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="current-password" />
+    </div>
+
+    <div class="card">
+      <div class="head"><span>Prize / item</span><span>Value ($)</span><span></span></div>
+      <div id="rows" class="rows"></div>
+      <div class="bar">
+        <button id="add" class="action ghost" type="button">+ Add prize</button>
+        <span class="summary" id="summary"></span>
+      </div>
+    </div>
+
+    <div class="bar">
+      <button id="save" class="action" type="button">Save prizes</button>
+      <button id="reload" class="action ghost" type="button">Reload from server</button>
+    </div>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <script>
+    const TOKEN_KEY = "dond_admin_token";
+    const rowsEl = document.getElementById("rows");
+    const tokenEl = document.getElementById("token");
+    const msgEl = document.getElementById("msg");
+    const summaryEl = document.getElementById("summary");
+
+    tokenEl.value = localStorage.getItem(TOKEN_KEY) || "";
+    tokenEl.addEventListener("change", () => localStorage.setItem(TOKEN_KEY, tokenEl.value));
+
+    const money = (n) => "$" + (Math.round(n) || 0).toLocaleString("en-US");
+
+    function addRow(name = "", value = "") {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML =
+        '<input class="name" type="text" placeholder="e.g. Nintendo Switch" />' +
+        '<input class="val" type="number" min="0" step="1" placeholder="0" />' +
+        '<button class="del" type="button" title="Remove">×</button>';
+      row.querySelector(".name").value = name;
+      row.querySelector(".val").value = value;
+      row.querySelector(".del").addEventListener("click", () => { row.remove(); updateSummary(); });
+      row.querySelector(".val").addEventListener("input", updateSummary);
+      rowsEl.appendChild(row);
+      updateSummary();
+    }
+
+    function collect() {
+      return Array.from(rowsEl.querySelectorAll(".row")).map((r) => ({
+        name: r.querySelector(".name").value.trim(),
+        value: Number(r.querySelector(".val").value),
+      }));
+    }
+
+    function updateSummary() {
+      const p = collect();
+      const total = p.reduce((s, x) => s + (Number.isFinite(x.value) ? x.value : 0), 0);
+      summaryEl.textContent = `${p.length} prize${p.length === 1 ? "" : "s"} · ${money(total)} total`;
+    }
+
+    function flash(text, ok) {
+      msgEl.textContent = text;
+      msgEl.className = "msg show " + (ok ? "ok" : "err");
+      if (ok) setTimeout(() => (msgEl.className = "msg"), 4000);
+    }
+
+    async function load() {
+      rowsEl.innerHTML = "";
+      try {
+        const res = await fetch("/api/prizes");
+        const prizes = await res.json();
+        if (Array.isArray(prizes) && prizes.length) {
+          prizes.forEach((p) => addRow(p.name, p.value));
+        } else {
+          addRow();
+        }
+      } catch {
+        flash("Couldn't load current prizes from the server.", false);
+        addRow();
+      }
+      updateSummary();
+    }
+
+    async function checkEnabled() {
+      try {
+        const res = await fetch("/api/admin/status");
+        const { enabled } = await res.json();
+        document.getElementById("disabled-notice").classList.toggle("show", !enabled);
+      } catch { /* ignore */ }
+    }
+
+    async function save() {
+      const prizes = collect();
+      if (prizes.some((p) => !p.name)) { flash("Every prize needs a name.", false); return; }
+      if (prizes.some((p) => !Number.isFinite(p.value) || p.value < 0)) { flash("Every prize needs a value of 0 or more.", false); return; }
+      try {
+        const res = await fetch("/api/prizes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-admin-token": tokenEl.value },
+          body: JSON.stringify(prizes),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          localStorage.setItem(TOKEN_KEY, tokenEl.value);
+          flash(`Saved ${data.count} prizes. They'll appear on the next New Game.`, true);
+        } else {
+          flash(data.error || `Save failed (${res.status}).`, false);
+        }
+      } catch {
+        flash("Network error while saving.", false);
+      }
+    }
+
+    document.getElementById("add").addEventListener("click", () => addRow());
+    document.getElementById("save").addEventListener("click", save);
+    document.getElementById("reload").addEventListener("click", load);
+
+    checkEnabled();
+    load();
+  </script>
+</body>
+</html>

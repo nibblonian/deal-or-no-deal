@@ -33,11 +33,16 @@ remaining cases dance while confetti rains down.
 The board shows **one case per prize** you define, so the number of cases and
 the round pacing adapt automatically to your list.
 
-Prizes are loaded from the first of these that exists (highest priority first):
+Two ways to set the prizes:
 
-1. `$PRIZES_PATH` — an absolute path set via environment variable
-2. `./config/prizes.json` — relative to the working directory
-3. `./prizes.json` — the copy baked in next to the server (the default)
+- **The manager view** at `/admin` — a password-protected editor (see
+  [Manager view](#manager-view-edit-prizes-anytime) below). Easiest, and it
+  works while the game is running/deployed.
+- **Editing the JSON file** directly. Prizes are loaded from the first of these
+  that exists (highest priority first):
+  1. `$PRIZES_PATH` — an absolute path set via environment variable
+  2. `./config/prizes.json` — relative to the working directory
+  3. `./prizes.json` — the copy baked in next to the server (the default seed)
 
 Format is a simple JSON array:
 
@@ -72,22 +77,77 @@ Then open <http://localhost:3000>.
 > `public/script.ts`, rebuild it with `bun run build:client` (or use `bun run
 > dev`, which watches for you).
 
+## Manager view (edit prizes anytime)
+
+Go to **`/admin`** for a simple editor: add/remove prizes, set values, Save.
+Changes take effect the next time someone starts a **New Game** (the game
+re-fetches the list each game — no page reload needed).
+
+- Editing is gated by a password. Set **`ADMIN_TOKEN`** on the server to enable
+  it; with no token set, `/admin` can view the list but not save.
+- Saves are written to the prizes file (`PRIZES_PATH`, i.e. the mounted
+  `config/` volume in Docker), so edits persist across restarts.
+
+> **Remote editing (e.g. from vacation):** only expose the NAS through
+> **QNAP's secure remote access (myQNAPcloud) or a VPN** — not a raw
+> port-forward. `ADMIN_TOKEN` is a backstop, not a substitute for that.
+
 ## Self-host with Docker
+
+Prizes live on a mounted `config/` volume so the manager view can edit them and
+the changes survive restarts (the baked-in `prizes.json` is just the seed).
 
 ```bash
 docker build -t deal-or-no-deal .
-docker run -p 3000:3000 deal-or-no-deal
 
-# override the prize list without rebuilding the image:
-docker run -p 3000:3000 \
-  -v /path/to/your/prizes.json:/app/config/prizes.json:ro \
+docker run -d --name dond -p 3000:3000 \
+  -v /path/on/host/dond-config:/app/config \
+  -e ADMIN_TOKEN='pick-a-secret' \
   deal-or-no-deal
 ```
 
 The server listens on port 3000 and exposes `GET /healthz` for health checks.
 
-`deploy.sh` is a convenience script that rsyncs the project to a Raspberry Pi —
-edit `PI_HOST`/`PI_PATH` at the top for your setup.
+## Publish to your QNAP NAS
+
+`publish.sh` builds the image for the NAS's CPU (**linux/amd64** by default —
+most QNAPs are Intel/AMD) and either pushes it to GitHub Container Registry or
+saves a tarball.
+
+**Option A — GitHub Container Registry (recommended):**
+
+```bash
+# one-time: log in with a GitHub token that has 'write:packages'
+echo $CR_PAT | docker login ghcr.io -u YOUR_GH_USERNAME --password-stdin
+
+GHCR_OWNER=YOUR_GH_USERNAME ./publish.sh          # build + push :latest
+GHCR_OWNER=YOUR_GH_USERNAME TAG=v2 ./publish.sh   # custom tag
+```
+
+Then in **QNAP Container Station** → pull `ghcr.io/YOUR_GH_USERNAME/deal-or-no-deal:latest`
+(log in on the NAS too if the package is private, or make it public under your
+GitHub account's Packages). To update later, re-run `publish.sh` and re-pull.
+
+**Option B — tarball import (no registry):**
+
+```bash
+./publish.sh tar        # produces deal-or-no-deal-latest-amd64.tar.gz
+```
+
+Copy that file to the NAS and **Container Station → Images → Import** (or
+`docker load -i deal-or-no-deal-latest-amd64.tar.gz`).
+
+**When you create the container** (either option), set:
+
+- **Port** 3000 → published to a NAS port of your choice.
+- **Volume** a NAS folder → `/app/config` (holds `prizes.json`; persists edits).
+- **Environment** `ADMIN_TOKEN` = your secret, to enable `/admin`.
+
+Since prizes live on that volume, you rarely need to rebuild — just edit at
+`/admin` or drop a `prizes.json` into the mounted folder.
+
+`deploy.sh` is a separate convenience script that rsyncs the project to a
+Raspberry Pi — edit `PI_HOST`/`PI_PATH` at the top for your setup.
 
 ## Tuning
 
