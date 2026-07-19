@@ -35,3 +35,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # manager-view prize edits (local + mounted volume)
 config/
+
+# built image artifacts
+*.tar
+*.tar.gz

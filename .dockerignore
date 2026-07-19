@@ -1,0 +1,8 @@
+node_modules
+.git
+config
+*.tar
+*.tar.gz
+*.log
+.DS_Store
+.idea
