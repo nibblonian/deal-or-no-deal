@@ -39,8 +39,15 @@
       border-radius: 8px; height: 38px; cursor: pointer; font-size: 1.1rem; line-height: 1;
     }
     .row button.del:hover { border-color: var(--bad); }
-    .head { display: grid; grid-template-columns: 1fr 120px 40px; gap: 8px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; opacity: 0.6; margin-bottom: 6px; padding: 0 2px; }
-    .head span:nth-child(2) { text-align: right; }
+    .head { display: grid; grid-template-columns: 1fr 120px 40px; gap: 8px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 6px; padding: 0 2px; }
+    .head button.sort {
+      font: inherit; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px;
+      color: inherit; background: transparent; border: none; cursor: pointer; padding: 0;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .head button.sort:hover { color: var(--gold); }
+    .head button.sort.val { justify-content: flex-end; }
+    .head .arrow { font-size: 0.85em; min-width: 0.6em; }
     button.action {
       font: inherit; font-weight: 700; cursor: pointer; border: none; border-radius: 9px;
       padding: 10px 16px; color: #1a1400; background: linear-gradient(#ffe08a, var(--gold-deep));
@@ -73,7 +80,11 @@
     </div>
 
     <div class="card">
-      <div class="head"><span>Prize / item</span><span>Value ($)</span><span></span></div>
+      <div class="head">
+        <button type="button" class="sort" data-key="name">Prize / item <span class="arrow" data-arrow="name"></span></button>
+        <button type="button" class="sort val" data-key="value">Value ($) <span class="arrow" data-arrow="value"></span></button>
+        <span></span>
+      </div>
       <div id="rows" class="rows"></div>
       <div class="bar">
         <button id="add" class="action ghost" type="button">+ Add prize</button>
@@ -84,6 +95,9 @@
     <div class="bar">
       <button id="save" class="action" type="button">Save prizes</button>
       <button id="reload" class="action ghost" type="button">Reload from server</button>
+      <button id="export" class="action ghost" type="button">Export JSON</button>
+      <button id="import" class="action ghost" type="button">Import JSON</button>
+      <input id="import-file" type="file" accept="application/json,.json" hidden />
     </div>
     <div id="msg" class="msg"></div>
   </div>
@@ -181,9 +195,65 @@
       }
     }
 
+    // --- sorting (click a column header) ---
+    const sortState = { key: null, dir: 1 };
+    function applySort(key) {
+      if (sortState.key === key) sortState.dir *= -1;
+      else { sortState.key = key; sortState.dir = 1; }
+      const data = collect();
+      data.sort((a, b) =>
+        key === "value"
+          ? (a.value - b.value) * sortState.dir
+          : a.name.localeCompare(b.name) * sortState.dir
+      );
+      rowsEl.innerHTML = "";
+      data.forEach((p) => addRow(p.name, p.value));
+      document.querySelectorAll(".arrow").forEach((el) => {
+        el.textContent = el.dataset.arrow === sortState.key ? (sortState.dir === 1 ? "▲" : "▼") : "";
+      });
+      updateSummary();
+    }
+
+    // --- export / import (client-side; import still needs a Save to persist) ---
+    function exportJson() {
+      const blob = new Blob([JSON.stringify(collect(), null, 2) + "\n"], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "prizes.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+    const importFileEl = document.getElementById("import-file");
+    async function importJson(file) {
+      try {
+        const data = JSON.parse(await file.text());
+        if (!Array.isArray(data)) throw new Error("not an array");
+        rowsEl.innerHTML = "";
+        if (data.length) data.forEach((p) => addRow((p && p.name) || "", p && p.value != null ? p.value : ""));
+        else addRow();
+        updateSummary();
+        flash(`Loaded ${data.length} prize${data.length === 1 ? "" : "s"} from file. Review, then Save to apply.`, true);
+      } catch {
+        flash("That file isn't valid prizes JSON (expected an array of { name, value }).", false);
+      }
+    }
+
     document.getElementById("add").addEventListener("click", () => addRow());
     document.getElementById("save").addEventListener("click", save);
     document.getElementById("reload").addEventListener("click", load);
+    document.querySelectorAll(".head button.sort").forEach((b) =>
+      b.addEventListener("click", () => applySort(b.dataset.key))
+    );
+    document.getElementById("export").addEventListener("click", exportJson);
+    document.getElementById("import").addEventListener("click", () => importFileEl.click());
+    importFileEl.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (f) importJson(f);
+      e.target.value = ""; // allow re-importing the same file
+    });
 
     checkEnabled();
     load();
